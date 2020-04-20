@@ -6,11 +6,11 @@ import java.util.List;
 import javax.jws.WebParam;
 import javax.jws.WebResult;
 import javax.jws.WebService;
+import javax.validation.constraints.NotNull;
 
 import org.apache.lucene.queryparser.classic.ParseException;
 
 import be.nabu.eai.module.lucene.LuceneArtifact;
-import be.nabu.eai.module.lucene.LuceneArtifact.SearchResult;
 import be.nabu.eai.repository.EAIResourceRepository;
 import be.nabu.libs.artifacts.api.Artifact;
 
@@ -18,11 +18,11 @@ import be.nabu.libs.artifacts.api.Artifact;
 public class Services {
 
 	@WebResult(name = "results")
-	public List<SearchResult> search(@WebParam(name = "luceneId") String id, @WebParam(name = "defaultField") String defaultField, @WebParam(name = "query") String query, @WebParam(name = "limit") Integer amountOfResults) throws ParseException, IOException {
+	public List<Object> search(@WebParam(name = "luceneId") String id, @NotNull @WebParam(name = "typeId") String type, @WebParam(name = "query") String query, @WebParam(name = "limit") Integer amountOfResults, @WebParam(name = "minimumScore") Double minimum) throws ParseException, IOException {
 		if (id != null) {
 			Artifact resolve = EAIResourceRepository.getInstance().resolve(id);
 			if (resolve instanceof LuceneArtifact) {
-				return ((LuceneArtifact) resolve).search(defaultField, query, amountOfResults == null ? 10 : amountOfResults);
+				return ((LuceneArtifact) resolve).search(type, query, amountOfResults == null ? 10 : amountOfResults, minimum);
 			}
 		}
 		return null;

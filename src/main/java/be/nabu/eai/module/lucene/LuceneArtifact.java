@@ -31,10 +31,14 @@ import be.nabu.libs.converter.ConverterFactory;
 import be.nabu.libs.property.api.Value;
 import be.nabu.libs.resources.api.ResourceContainer;
 import be.nabu.libs.types.ComplexContentWrapperFactory;
+import be.nabu.libs.types.DefinedTypeResolverFactory;
 import be.nabu.libs.types.TypeUtils;
 import be.nabu.libs.types.api.ComplexContent;
+import be.nabu.libs.types.api.ComplexType;
 import be.nabu.libs.types.api.Element;
+import be.nabu.libs.types.api.KeyValuePair;
 import be.nabu.libs.types.properties.PrimaryKeyProperty;
+import be.nabu.libs.types.properties.TokenProperty;
 
 /**
  * There are two methods to use this artifact:
@@ -51,12 +55,14 @@ public class LuceneArtifact extends JAXBArtifact<LuceneConfiguration> {
 	public static class SearchResult {
 		private String id;
 		private float score;
+		private List<KeyValuePair> properties;
 		public SearchResult() {
 			// auto
 		}
-		public SearchResult(String id, float score) {
+		public SearchResult(String id, float score, List<KeyValuePair> properties) {
 			this.id = id;
 			this.score = score;
+			this.properties = properties;
 		}
 		public String getId() {
 			return id;
@@ -69,6 +75,12 @@ public class LuceneArtifact extends JAXBArtifact<LuceneConfiguration> {
 		}
 		public void setScore(float score) {
 			this.score = score;
+		}
+		public List<KeyValuePair> getProperties() {
+			return properties;
+		}
+		public void setProperties(List<KeyValuePair> properties) {
+			this.properties = properties;
 		}
 	}
 	
@@ -93,16 +105,49 @@ public class LuceneArtifact extends JAXBArtifact<LuceneConfiguration> {
 		}
 	}
 	
-	public List<SearchResult> search(String defaultField, String q, int amountOfResults) throws ParseException, IOException {
+	public List<Object> search(String resultType, String q, int amountOfResults, Double minimum) throws ParseException, IOException {
+		ComplexType type = (ComplexType) DefinedTypeResolverFactory.getInstance().getResolver().resolve(resultType);
+		if (type == null) {
+			throw new IllegalArgumentException("Can not find type: " + resultType);
+		}
+		String defaultField = null;
+		Element<?> primary = null;
+		for (Element<?> child : TypeUtils.getAllChildren(type)) {
+			Value<Boolean> property = child.getProperty(PrimaryKeyProperty.getInstance());
+			if (property != null && property.getValue() != null && property.getValue()) {
+				primary = child;
+			}
+			else if (defaultField == null) {
+				property = child.getProperty(TokenProperty.getInstance());
+				// if it is not a token, we assume it is the default field
+				if (property == null || property.getValue() == null || !property.getValue()) {
+					defaultField = child.getName();
+				}
+			}
+		}
+		if (primary == null) {
+			throw new IllegalArgumentException("Can not find primary key of: " + resultType);
+		}
 		Query query = new QueryParser(defaultField, new StandardAnalyzer()).parse(q);
 		IndexReader reader = getReader();
 		IndexSearcher searcher = new IndexSearcher(reader);
 	    TopDocs topDocs = searcher.search(query, amountOfResults);
-	    List<SearchResult> results = new ArrayList<SearchResult>();
+	    List<Object> results = new ArrayList<Object>();
 	    for (ScoreDoc scoreDoc : topDocs.scoreDocs) {
+	    	if (minimum != null && scoreDoc.score < minimum) {
+	    		break;
+	    	}
 	        Document document = searcher.doc(scoreDoc.doc);
-	        IndexableField field = document.getField("$id");
-			results.add(new SearchResult(field.stringValue(), scoreDoc.score));
+	        ComplexContent instance = type.newInstance();
+	        for (IndexableField field : document.getFields()) {
+	        	if (field.name().equals("$id")) {
+	        		instance.set(primary.getName(), field.stringValue());
+	        	}
+	        	else {
+	        		instance.set(field.name(), field.stringValue());
+	        	}
+	        }
+			results.add(instance);
 	    }
 	    return results;
 	}
@@ -140,7 +185,15 @@ public class LuceneArtifact extends JAXBArtifact<LuceneConfiguration> {
 								keyValue = (String) value;
 							}
 							else {
-								document.add(new TextField(child.getName(), (String) value, Store.NO));
+								property = child.getProperty(TokenProperty.getInstance());
+								// tokens are non-id fields that are stored
+								boolean isToken = property != null && property.getValue() != null && property.getValue();
+								if (isToken) {
+									document.add(new StringField(child.getName(), (String) value, Store.YES));	
+								}
+								else {
+									document.add(new TextField(child.getName(), (String) value, Store.NO));
+								}
 							}
 						}
 					}
