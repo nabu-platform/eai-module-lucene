@@ -170,6 +170,7 @@ public class LuceneArtifact extends JAXBArtifact<LuceneConfiguration> {
 						continue;
 					}
 					String keyValue = null;
+					boolean hasIndexableValue = false;
 					Document document = new Document();
 					for (Element<?> child : TypeUtils.getAllChildren(((ComplexContent) entry).getType())) {
 						Object value = ((ComplexContent) entry).get(child.getName());
@@ -189,16 +190,17 @@ public class LuceneArtifact extends JAXBArtifact<LuceneConfiguration> {
 								// tokens are non-id fields that are stored
 								boolean isToken = property != null && property.getValue() != null && property.getValue();
 								if (isToken) {
-									document.add(new StringField(child.getName(), (String) value, Store.YES));	
+									document.add(new StringField(child.getName(), (String) value, Store.YES));
 								}
 								else {
 									document.add(new TextField(child.getName(), (String) value, Store.NO));
 								}
+								hasIndexableValue = true;
 							}
 						}
 					}
 					// we only store documents with a primary key, otherwise we have little use for them afterwards
-					if (keyValue != null) {
+					if (keyValue != null && hasIndexableValue) {
 						writer.updateDocument(new Term("$id", keyValue), document);
 					}
 				}
