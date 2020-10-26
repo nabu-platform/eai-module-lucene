@@ -144,7 +144,19 @@ public class LuceneArtifact extends JAXBArtifact<LuceneConfiguration> {
 	        		instance.set(primary.getName(), field.stringValue());
 	        	}
 	        	else {
-	        		instance.set(field.name(), field.stringValue());
+	        		Element<?> element = instance.getType().get(field.name());
+	        		if (element.getType().isList(element.getProperties())) {
+	        			Object object = instance.get(field.name());
+	        			int index = 0;
+	        			if (object != null) {
+	        				// TODO: should support more than lists...
+	        				index = ((List<?>) object).size();
+	        			}
+	        			instance.set(field.name() + "[" + index + "]", field.stringValue());
+	        		}
+	        		else {
+	        			instance.set(field.name(), field.stringValue());
+	        		}
 	        	}
 	        }
 			results.add(instance);
@@ -174,28 +186,55 @@ public class LuceneArtifact extends JAXBArtifact<LuceneConfiguration> {
 					Document document = new Document();
 					for (Element<?> child : TypeUtils.getAllChildren(((ComplexContent) entry).getType())) {
 						Object value = ((ComplexContent) entry).get(child.getName());
-						if (value != null && !(value instanceof String)) {
-							value = ConverterFactory.getInstance().getConverter().convert(value, String.class);
+						if (value == null) {
+							continue;
 						}
-						if (value != null) {
-							Value<Boolean> property = child.getProperty(PrimaryKeyProperty.getInstance());
-							boolean isPrimary = property != null && property.getValue() != null && property.getValue();
-							// only store it if it is a primary key, the rest only serves as index
-							if (isPrimary) {
-								document.add(new StringField("$id", (String) value, Store.YES));
-								keyValue = (String) value;
-							}
-							else {
-								property = child.getProperty(TokenProperty.getInstance());
-								// tokens are non-id fields that are stored
-								boolean isToken = property != null && property.getValue() != null && property.getValue();
+						
+						Value<Boolean> property = child.getProperty(PrimaryKeyProperty.getInstance());
+						boolean isPrimary = property != null && property.getValue() != null && property.getValue();
+						property = child.getProperty(TokenProperty.getInstance());
+						// tokens are non-id fields that are stored
+						boolean isToken = property != null && property.getValue() != null && property.getValue();
+						
+						if (value instanceof Iterable) {
+							for (Object single : (Iterable<?>) value) {
+								if (single == null) {
+									continue;
+								}
+								if (!(single instanceof String)) {
+									single = ConverterFactory.getInstance().getConverter().convert(single, String.class);
+								}
+								// can not be converted to string
+								if (single == null || ((String) single).trim().isEmpty()) {
+									continue;
+								}
 								if (isToken) {
-									document.add(new StringField(child.getName(), (String) value, Store.YES));
+									document.add(new StringField(child.getName(), (String) single, Store.YES));
 								}
 								else {
-									document.add(new TextField(child.getName(), (String) value, Store.NO));
+									document.add(new TextField(child.getName(), (String) single, Store.NO));
 								}
-								hasIndexableValue = true;
+							}
+						}
+						else {
+							if (value != null && !(value instanceof String)) {
+								value = ConverterFactory.getInstance().getConverter().convert(value, String.class);
+							}
+							if (value != null && !((String) value).trim().isEmpty()) {
+								// only store it if it is a primary key, the rest only serves as index
+								if (isPrimary) {
+									document.add(new StringField("$id", (String) value, Store.YES));
+									keyValue = (String) value;
+								}
+								else {
+									if (isToken) {
+										document.add(new StringField(child.getName(), (String) value, Store.YES));
+									}
+									else {
+										document.add(new TextField(child.getName(), (String) value, Store.NO));
+									}
+									hasIndexableValue = true;
+								}
 							}
 						}
 					}
